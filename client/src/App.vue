@@ -3,18 +3,17 @@
   import MaterialForm from './components/MaterialForm.vue';
   import MaterialList from './components/MaterialList.vue';
   import ProductionForm from './components/ProductionForm.vue';
-  import BlockOutput from './components/BlockOutput.vue'; // New Import
+  import BlockOutput from './components/BlockOutput.vue';
+  import TraceabilityReport from './components/TraceabilityReport.vue'; // New Import
 
   const inventoryList = ref(null);
-  const blockStation = ref(null); // Ref to update the dropdown
+  const blockStation = ref(null);
 
   const handleMaterialAdded = () => {
     inventoryList.value.fetchMaterials();
   };
 
   const handleRunStarted = () => {
-    // When a new run starts, tell the Block Station to refresh its dropdown
-    // so the new Vat appears immediately.
     if (blockStation.value) {
         blockStation.value.fetchRuns();
     }
@@ -30,6 +29,10 @@
 
     <main>
       <div class="dashboard-grid">
+        <div class="full-width">
+            <TraceabilityReport />
+        </div>
+
         <div class="column">
             <MaterialForm @added="handleMaterialAdded" />
             <div class="spacer"></div>
@@ -38,9 +41,7 @@
 
         <div class="column">
             <BlockOutput ref="blockStation" />
-            
             <div class="spacer"></div>
-
             <MaterialList ref="inventoryList" />
         </div>
       </div>
@@ -72,9 +73,15 @@ h1 { color: #2c3e50; margin: 0; }
 
 .dashboard-grid {
   display: grid;
-  grid-template-columns: 1fr 1fr; /* Changed to equal width 1fr 1fr */
+  grid-template-columns: 1fr 1fr;
   gap: 2rem;
   align-items: start;
+}
+
+/* New Class for Full Width elements */
+.full-width {
+    grid-column: 1 / -1; /* Span all columns */
+    margin-bottom: 2rem;
 }
 
 .spacer { height: 2rem; }

@@ -9,9 +9,9 @@ app.use(cors());
 app.use(express.json());
 
 const db = new sqlite3.Database('./cheese_factory.db', (err) => {
-  if (err) console.error('Error opening database:', err.message);
+  if (err) console.error(err.message);
   else {
-    console.log('Connected to the SQLite database.');
+    console.log('Connected to SQLite.');
     createTables();
   }
 });
@@ -26,14 +26,12 @@ function createTables() {
             unit TEXT NOT NULL,
             received_date TEXT DEFAULT CURRENT_TIMESTAMP
         )`);
-
         db.run(`CREATE TABLE IF NOT EXISTS production_runs (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             run_date TEXT NOT NULL,
             vat_number TEXT,
             notes TEXT
         )`);
-
         db.run(`CREATE TABLE IF NOT EXISTS material_usage (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             run_id INTEGER,
@@ -42,7 +40,6 @@ function createTables() {
             FOREIGN KEY(run_id) REFERENCES production_runs(id),
             FOREIGN KEY(material_id) REFERENCES raw_materials(id)
         )`);
-
         db.run(`CREATE TABLE IF NOT EXISTS finished_blocks (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             run_id INTEGER,
@@ -51,13 +48,12 @@ function createTables() {
             status TEXT DEFAULT 'Aging',
             FOREIGN KEY(run_id) REFERENCES production_runs(id)
         )`);
-        console.log("Database tables checked/initialized.");
+        console.log("Tables ready.");
     });
 }
 
 // --- API ROUTES ---
 
-// 1. GET Materials
 app.get('/api/materials', (req, res) => {
     db.all("SELECT * FROM raw_materials ORDER BY received_date DESC", [], (err, rows) => {
         if (err) return res.status(400).json({ error: err.message });
@@ -65,7 +61,6 @@ app.get('/api/materials', (req, res) => {
     });
 });
 
-// 2. ADD Material
 app.post('/api/materials', (req, res) => {
     const { name, lot_code, quantity, unit } = req.body;
     db.run(`INSERT INTO raw_materials (name, lot_code, quantity, unit) VALUES (?, ?, ?, ?)`, 
@@ -76,26 +71,20 @@ app.post('/api/materials', (req, res) => {
     });
 });
 
-// 3. GET Production Runs (Active Vats)
-// We need this so the "Weigh Station" knows which Vats are available.
 app.get('/api/production', (req, res) => {
-    // Get the last 10 runs (most recent first)
     db.all("SELECT * FROM production_runs ORDER BY id DESC LIMIT 10", [], (err, rows) => {
         if (err) return res.status(400).json({ error: err.message });
         res.json({ data: rows });
     });
 });
 
-// 4. CREATE Production Run
 app.post('/api/production', (req, res) => {
     const { run_date, vat_number, ingredients } = req.body;
-    
     db.run(`INSERT INTO production_runs (run_date, vat_number) VALUES (?, ?)`, 
         [run_date, vat_number], 
         function (err) {
             if (err) return res.status(400).json({ error: err.message });
             const runId = this.lastID;
-
             if (ingredients && ingredients.length > 0) {
                 const stmt = db.prepare(`INSERT INTO material_usage (run_id, material_id, quantity_used) VALUES (?, ?, ?)`);
                 ingredients.forEach((ing) => stmt.run(runId, ing.id, ing.quantity));
@@ -105,15 +94,52 @@ app.post('/api/production', (req, res) => {
     });
 });
 
-// 5. CREATE Finished Block (Weigh Station)
 app.post('/api/blocks', (req, res) => {
     const { run_id, weight, serial_number } = req.body;
-    
     db.run(`INSERT INTO finished_blocks (run_id, weight, serial_number) VALUES (?, ?, ?)`,
         [run_id, weight, serial_number],
         function (err) {
             if (err) return res.status(400).json({ error: err.message });
             res.json({ message: "Block recorded", id: this.lastID });
+    });
+});
+
+// --- NEW: TRACEABILITY REPORT ENDPOINT ---
+app.get('/api/trace/:serial', (req, res) => {
+    const serial = req.params.serial;
+
+    // Step 1: Find the Block and the Run it came from
+    const blockSql = `
+        SELECT 
+            b.serial_number, b.weight, b.status, 
+            p.vat_number, p.run_date, p.id as run_id
+        FROM finished_blocks b
+        JOIN production_runs p ON b.run_id = p.id
+        WHERE b.serial_number = ?
+    `;
+
+    db.get(blockSql, [serial], (err, block) => {
+        if (err) return res.status(400).json({ error: err.message });
+        if (!block) return res.status(404).json({ error: "Block not found" });
+
+        // Step 2: Find all ingredients used in that Run
+        const ingredientsSql = `
+            SELECT 
+                r.name, r.lot_code, u.quantity_used
+            FROM material_usage u
+            JOIN raw_materials r ON u.material_id = r.id
+            WHERE u.run_id = ?
+        `;
+
+        db.all(ingredientsSql, [block.run_id], (err, ingredients) => {
+            if (err) return res.status(400).json({ error: err.message });
+            
+            // Combine them into one report
+            res.json({ 
+                block_info: block,
+                ingredients: ingredients
+            });
+        });
     });
 });
 
