@@ -2,19 +2,15 @@ const express = require('express');
 const cors = require('cors');
 const sqlite3 = require('sqlite3').verbose();
 
-// Initialize the Express App
 const app = express();
 const port = 3000;
 
-// Middleware
 app.use(cors());
 app.use(express.json());
 
-// Database Initialization
 const db = new sqlite3.Database('./cheese_factory.db', (err) => {
-  if (err) {
-    console.error('Error opening database:', err.message);
-  } else {
+  if (err) console.error('Error opening database:', err.message);
+  else {
     console.log('Connected to the SQLite database.');
     createTables();
   }
@@ -55,52 +51,72 @@ function createTables() {
             status TEXT DEFAULT 'Aging',
             FOREIGN KEY(run_id) REFERENCES production_runs(id)
         )`);
-        
         console.log("Database tables checked/initialized.");
     });
 }
 
 // --- API ROUTES ---
 
-// 1. GET all raw materials
-// This allows the frontend to display the list of inventory.
+// 1. GET Materials
 app.get('/api/materials', (req, res) => {
-    const sql = "SELECT * FROM raw_materials ORDER BY received_date DESC";
-    db.all(sql, [], (err, rows) => {
-        if (err) {
-            return res.status(400).json({ error: err.message });
-        }
+    db.all("SELECT * FROM raw_materials ORDER BY received_date DESC", [], (err, rows) => {
+        if (err) return res.status(400).json({ error: err.message });
         res.json({ data: rows });
     });
 });
 
-// 2. ADD a new raw material
-// This allows the frontend to save a new shipment of ingredients.
+// 2. ADD Material
 app.post('/api/materials', (req, res) => {
     const { name, lot_code, quantity, unit } = req.body;
-    
-    // SQL query to insert data
-    const sql = `INSERT INTO raw_materials (name, lot_code, quantity, unit) VALUES (?, ?, ?, ?)`;
-    const params = [name, lot_code, quantity, unit];
-
-    db.run(sql, params, function (err) {
-        if (err) {
-            return res.status(400).json({ error: err.message });
-        }
-        // Send back the ID of the new item
-        res.json({ 
-            message: "Material added successfully",
-            id: this.lastID 
-        });
+    db.run(`INSERT INTO raw_materials (name, lot_code, quantity, unit) VALUES (?, ?, ?, ?)`, 
+        [name, lot_code, quantity, unit], 
+        function (err) {
+            if (err) return res.status(400).json({ error: err.message });
+            res.json({ message: "Material added", id: this.lastID });
     });
 });
 
-// Basic Test Route
-app.get('/', (req, res) => {
-  res.json({ message: 'Cheese Factory API is running...' });
+// 3. GET Production Runs (Active Vats)
+// We need this so the "Weigh Station" knows which Vats are available.
+app.get('/api/production', (req, res) => {
+    // Get the last 10 runs (most recent first)
+    db.all("SELECT * FROM production_runs ORDER BY id DESC LIMIT 10", [], (err, rows) => {
+        if (err) return res.status(400).json({ error: err.message });
+        res.json({ data: rows });
+    });
 });
 
-// Start the Server
+// 4. CREATE Production Run
+app.post('/api/production', (req, res) => {
+    const { run_date, vat_number, ingredients } = req.body;
+    
+    db.run(`INSERT INTO production_runs (run_date, vat_number) VALUES (?, ?)`, 
+        [run_date, vat_number], 
+        function (err) {
+            if (err) return res.status(400).json({ error: err.message });
+            const runId = this.lastID;
+
+            if (ingredients && ingredients.length > 0) {
+                const stmt = db.prepare(`INSERT INTO material_usage (run_id, material_id, quantity_used) VALUES (?, ?, ?)`);
+                ingredients.forEach((ing) => stmt.run(runId, ing.id, ing.quantity));
+                stmt.finalize();
+            }
+            res.json({ message: "Production Run started", run_id: runId });
+    });
+});
+
+// 5. CREATE Finished Block (Weigh Station)
+app.post('/api/blocks', (req, res) => {
+    const { run_id, weight, serial_number } = req.body;
+    
+    db.run(`INSERT INTO finished_blocks (run_id, weight, serial_number) VALUES (?, ?, ?)`,
+        [run_id, weight, serial_number],
+        function (err) {
+            if (err) return res.status(400).json({ error: err.message });
+            res.json({ message: "Block recorded", id: this.lastID });
+    });
+});
+
 app.listen(port, () => {
   console.log(`Server is running on http://localhost:${port}`);
 });
