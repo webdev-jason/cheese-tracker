@@ -1,0 +1,9 @@
+# Prioritize Vue and Database logic over generic JS
+*.js linguist-language=JavaScript
+*.vue linguist-language=Vue
+*.db linguist-language=SQLite
+
+# Hide build artifacts and generic assets from stats
+package-lock.json linguist-vendored
+*.css linguist-vendored
+*.html linguist-vendored
