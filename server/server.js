@@ -54,6 +54,7 @@ function createTables() {
 
 // --- API ROUTES ---
 
+// 1. GET Materials
 app.get('/api/materials', (req, res) => {
     db.all("SELECT * FROM raw_materials ORDER BY received_date DESC", [], (err, rows) => {
         if (err) return res.status(400).json({ error: err.message });
@@ -61,6 +62,7 @@ app.get('/api/materials', (req, res) => {
     });
 });
 
+// 2. ADD Material
 app.post('/api/materials', (req, res) => {
     const { name, lot_code, quantity, unit } = req.body;
     db.run(`INSERT INTO raw_materials (name, lot_code, quantity, unit) VALUES (?, ?, ?, ?)`, 
@@ -71,6 +73,7 @@ app.post('/api/materials', (req, res) => {
     });
 });
 
+// 3. GET Active Production Runs
 app.get('/api/production', (req, res) => {
     db.all("SELECT * FROM production_runs ORDER BY id DESC LIMIT 10", [], (err, rows) => {
         if (err) return res.status(400).json({ error: err.message });
@@ -78,6 +81,7 @@ app.get('/api/production', (req, res) => {
     });
 });
 
+// 4. CREATE Production Run
 app.post('/api/production', (req, res) => {
     const { run_date, vat_number, ingredients } = req.body;
     db.run(`INSERT INTO production_runs (run_date, vat_number) VALUES (?, ?)`, 
@@ -94,6 +98,7 @@ app.post('/api/production', (req, res) => {
     });
 });
 
+// 5. CREATE Finished Block
 app.post('/api/blocks', (req, res) => {
     const { run_id, weight, serial_number } = req.body;
     db.run(`INSERT INTO finished_blocks (run_id, weight, serial_number) VALUES (?, ?, ?)`,
@@ -104,11 +109,9 @@ app.post('/api/blocks', (req, res) => {
     });
 });
 
-// --- NEW: TRACEABILITY REPORT ENDPOINT ---
+// 6. TRACEABILITY: UPSTREAM (Serial -> Ingredients)
 app.get('/api/trace/:serial', (req, res) => {
     const serial = req.params.serial;
-
-    // Step 1: Find the Block and the Run it came from
     const blockSql = `
         SELECT 
             b.serial_number, b.weight, b.status, 
@@ -122,7 +125,6 @@ app.get('/api/trace/:serial', (req, res) => {
         if (err) return res.status(400).json({ error: err.message });
         if (!block) return res.status(404).json({ error: "Block not found" });
 
-        // Step 2: Find all ingredients used in that Run
         const ingredientsSql = `
             SELECT 
                 r.name, r.lot_code, u.quantity_used
@@ -133,13 +135,61 @@ app.get('/api/trace/:serial', (req, res) => {
 
         db.all(ingredientsSql, [block.run_id], (err, ingredients) => {
             if (err) return res.status(400).json({ error: err.message });
-            
-            // Combine them into one report
-            res.json({ 
-                block_info: block,
-                ingredients: ingredients
-            });
+            res.json({ block_info: block, ingredients: ingredients });
         });
+    });
+});
+
+// 7. TRACEABILITY: DOWNSTREAM (Lot -> Blocks)
+// This is the new endpoint for Recall Search
+app.get('/api/trace-lot/:lot', (req, res) => {
+    const lotCode = req.params.lot;
+
+    const sql = `
+        SELECT 
+            m.name as material_name, 
+            m.lot_code,
+            p.vat_number, 
+            p.run_date, 
+            p.id as run_id,
+            b.serial_number, 
+            b.weight, 
+            b.status
+        FROM raw_materials m
+        JOIN material_usage u ON m.id = u.material_id
+        JOIN production_runs p ON u.run_id = p.id
+        LEFT JOIN finished_blocks b ON p.id = b.run_id
+        WHERE m.lot_code = ?
+        ORDER BY p.run_date DESC, b.serial_number ASC
+    `;
+
+    db.all(sql, [lotCode], (err, rows) => {
+        if (err) return res.status(400).json({ error: err.message });
+        if (rows.length === 0) return res.status(404).json({ error: "Lot not found or not used in production yet." });
+
+        const result = {
+            material: rows[0].material_name,
+            lot_code: rows[0].lot_code,
+            runs: {}
+        };
+
+        rows.forEach(row => {
+            if (!result.runs[row.vat_number]) {
+                result.runs[row.vat_number] = {
+                    date: row.run_date,
+                    blocks: []
+                };
+            }
+            if (row.serial_number) {
+                result.runs[row.vat_number].blocks.push({
+                    serial: row.serial_number,
+                    weight: row.weight,
+                    status: row.status
+                });
+            }
+        });
+
+        res.json(result);
     });
 });
 

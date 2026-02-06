@@ -4,7 +4,7 @@
   import MaterialList from './components/MaterialList.vue';
   import ProductionForm from './components/ProductionForm.vue';
   import BlockOutput from './components/BlockOutput.vue';
-  import TraceabilityReport from './components/TraceabilityReport.vue'; // New Import
+  import TraceabilityReport from './components/TraceabilityReport.vue';
 
   const inventoryList = ref(null);
   const blockStation = ref(null);
@@ -29,10 +29,6 @@
 
     <main>
       <div class="dashboard-grid">
-        <div class="full-width">
-            <TraceabilityReport />
-        </div>
-
         <div class="column">
             <MaterialForm @added="handleMaterialAdded" />
             <div class="spacer"></div>
@@ -43,6 +39,11 @@
             <BlockOutput ref="blockStation" />
             <div class="spacer"></div>
             <MaterialList ref="inventoryList" />
+        </div>
+
+        <div class="full-width">
+            <div class="divider"></div>
+            <TraceabilityReport />
         </div>
       </div>
     </main>
@@ -78,10 +79,16 @@ h1 { color: #2c3e50; margin: 0; }
   align-items: start;
 }
 
-/* New Class for Full Width elements */
 .full-width {
     grid-column: 1 / -1; /* Span all columns */
+    margin-top: 2rem;
+}
+
+.divider {
+    height: 4px;
+    background-color: #ddd;
     margin-bottom: 2rem;
+    border-radius: 2px;
 }
 
 .spacer { height: 2rem; }
